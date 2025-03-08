@@ -9,18 +9,18 @@ class MyCRB
     private $logBuffer = '';
     private const LOG_FLUSH_LIMIT = 4096;
     private $ollamaBuffer = '';
-
     private $isFirstOllamaLine = true;
-    private $finalReviewContent = ''; // 新增最终评审内容存储
+    private $finalReviewContent = '';
 
-
+    // 构造函数初始化配置和输出缓冲
     public function __construct()
     {
         $this->config = require __DIR__ . '/config/code_review.php';
         $this->validateConfig();
-        ob_start();
+        ob_start(); // 启用输出缓冲
     }
 
+    // 验证配置完整性
     private function validateConfig()
     {
         $requiredKeys = ['github_token', 'ollama_host', 'model_name'];
@@ -34,79 +34,89 @@ class MyCRB
             throw new RuntimeException("无效的Ollama地址: {$this->config['ollama_host']}");
         }
 
+        // 设置默认配置值
         $this->config['context_length'] = $this->config['context_length'] ?? 4096;
         $this->config['log_dir']        = $this->config['log_dir'] ?? __DIR__ . '/logs';
     }
 
+    // 初始化日志文件路径
     private function initLogFile()
     {
-        $filename      = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
+        $safeUrl       = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
         $timestamp     = date('Y.m.d.H.i.s');
-        $this->logFile = $this->config['log_dir'] . '/' . $filename . "+{$timestamp}.log";
+        $this->logFile = "{$this->config['log_dir']}/{$safeUrl}+{$timestamp}.log";
         $this->ensureDirExists(dirname($this->logFile));
     }
 
+    // 确保日志目录存在且可写
     private function ensureDirExists($dirPath)
     {
-        if (!file_exists($dirPath)) {
-            if (!mkdir($dirPath, 0750, true) && !is_dir($dirPath)) {
+        if (!is_dir($dirPath)) {
+            if (!mkdir($dirPath, 0750, true)) {
                 throw new Exception("目录创建失败: {$dirPath}");
             }
         }
-
         if (!is_writable($dirPath)) {
             throw new Exception("目录不可写: {$dirPath}");
         }
     }
 
+    // 主执行流程
     public function run($prUrl, $postType = null)
     {
-        set_time_limit(600); // 设置全局超时时间
+        set_time_limit(600); // 设置最长执行时间
+        $this->prUrl = $prUrl;
+        $this->initLogFile();
+        $this->logInput("Command: " . implode(' ', $_SERVER['argv']));
+        $this->logInput("Starting review for PR: {$prUrl}");
 
         try {
-            $this->prUrl = $prUrl;
-            $this->initLogFile();
-            $this->logInput("Command: " . implode(' ', $_SERVER['argv']));
-            $this->logInput("Starting review for PR: {$prUrl}");
-
             $diffContent = $this->getGitHubDiff();
             $this->logDiff($diffContent);
 
             if ($postType === 'now') {
-                $startTime = microtime(true);
-                $this->callOllama($diffContent);
-                $duration = round(microtime(true) - $startTime, 2);
-                $this->logInput("Review completed in {$duration}s");
-                $this->submitCurrentReview();
+                $this->executeAndSubmitReview($diffContent);
             } elseif ($postType === 'pre') {
-                $success = $this->submitPreviousReview();
-                if (!$success) {
-                    $startTime = microtime(true);
-                    $this->callOllama($diffContent);
-                    $duration = round(microtime(true) - $startTime, 2);
-                    $this->logInput("Review completed in {$duration}s");
-                    echo "⚠️ 未找到历史评审记录，已生成新评审内容但未提交。使用 -p pre 参数提交本次结果；或是使用-p now重新生成评审并提交\n";
-                }
+                $this->handlePreviousReview($diffContent);
             } else {
-                $startTime = microtime(true);
-                $this->callOllama($diffContent);
-                $duration = round(microtime(true) - $startTime, 2);
-                $this->logInput("Review completed in {$duration}s");
+                $this->generateReview($diffContent);
             }
         } catch (Exception $e) {
             $this->handleError($e);
         } finally {
-            ob_end_flush();
+            ob_end_flush(); // 确保输出缓冲释放
         }
     }
 
-    private function handleError(Exception $e)
+    // 处理历史评审提交
+    private function handlePreviousReview($diffContent)
     {
-        $message = "Error [{$e->getCode()}]: {$e->getMessage()}";
-        echo $message . PHP_EOL;
-        $this->logInput($message);
+        if (!$this->submitPreviousReview()) {
+            $this->generateReview($diffContent);
+            echo "⚠️ 未找到历史评审记录，已生成新评审内容但未提交。使用 -p pre 提交本次结果；或使用 -p now 重新生成并提交" . PHP_EOL;
+        }
     }
 
+    // 执行评审生成并提交
+    private function executeAndSubmitReview($diffContent)
+    {
+        $startTime = microtime(true);
+        $this->callOllama($diffContent);
+        $duration = round(microtime(true) - $startTime, 2);
+        $this->logInput("Review completed in {$duration}s");
+        $this->submitCurrentReview();
+    }
+
+    // 仅生成评审不提交
+    private function generateReview($diffContent)
+    {
+        $startTime = microtime(true);
+        $this->callOllama($diffContent);
+        $duration = round(microtime(true) - $startTime, 2);
+        $this->logInput("Review completed in {$duration}s");
+    }
+
+    // 获取GitHub PR的diff内容
     private function getGitHubDiff()
     {
         $parsed    = parse_url($this->prUrl);
@@ -117,8 +127,8 @@ class MyCRB
         }
 
         list($owner, $repo, , $prNumber) = $pathParts;
+        $apiUrl = "https://api.github.com/repos/{$owner}/{$repo}/pulls/{$prNumber}";
 
-        $apiUrl  = "https://api.github.com/repos/{$owner}/{$repo}/pulls/{$prNumber}";
         $context = stream_context_create([
             'http' => [
                 'method'        => 'GET',
@@ -131,13 +141,13 @@ class MyCRB
             ]
         ]);
 
-        $response = file_get_contents($apiUrl, false, $context);
+        $response = @file_get_contents($apiUrl, false, $context);
         if ($response === false) {
             $error = error_get_last();
             throw new RuntimeException("GitHub API请求失败: {$error['message']}");
         }
 
-        $statusCode = explode(' ', $http_response_header[0] ?? '')[1] ?? 'unknown';
+        $statusCode = $this->getStatusCodeFromHeader($http_response_header);
         if ($statusCode != 200) {
             throw new RuntimeException("GitHub API返回错误: HTTP {$statusCode} - " . substr($response, 0, 512));
         }
@@ -145,7 +155,18 @@ class MyCRB
         return $response;
     }
 
+    // 从响应头解析HTTP状态码
+    private function getStatusCodeFromHeader($headers)
+    {
+        foreach ($headers as $header) {
+            if (strpos($header, 'HTTP/') === 0) {
+                return (int)substr($header, 9, 3);
+            }
+        }
+        return 0;
+    }
 
+    // 调用Ollama生成评审内容
     private function callOllama($diffContent)
     {
         $prompt       = str_replace('{diff}', $diffContent, $this->config['prompt']);
@@ -157,9 +178,8 @@ class MyCRB
 
         $maxRetries = 3;
         $retryCount = 0;
-        $success    = false;
 
-        while ($retryCount < $maxRetries && !$success) {
+        while ($retryCount < $maxRetries) {
             $ch = curl_init();
             curl_setopt_array($ch, [
                 CURLOPT_URL            => rtrim($this->config['ollama_host'], '/') . '/api/generate',
@@ -180,21 +200,22 @@ class MyCRB
                 CURLOPT_TCP_NODELAY    => true
             ]);
 
-            if (curl_exec($ch)) {
-                $success = true;
-            } else {
-                $retryCount++;
-                $this->logInput("Ollama调用失败，重试次数：{$retryCount}/{$maxRetries}");
-                sleep(1);
-            }
+            $success = curl_exec($ch);
             curl_close($ch);
+
+            if ($success) {
+                return;
+            }
+
+            $retryCount++;
+            $this->logInput("Ollama调用失败，重试次数：{$retryCount}/{$maxRetries}");
+            sleep(1);
         }
 
-        if (!$success) {
-            throw new RuntimeException("Ollama服务调用失败，已达到最大重试次数");
-        }
+        throw new RuntimeException("Ollama服务调用失败，已达到最大重试次数");
     }
 
+    // 获取流式响应处理回调
     private function getStreamHandler()
     {
         return function ($ch, $data) {
@@ -206,120 +227,96 @@ class MyCRB
         };
     }
 
-    private function logDiff($content)
+    // 处理Ollama流式响应
+    private function handleStreamResponse(array $response)
     {
-        $this->logMessage('DIFF', "PR Diff Content:\n" . $content);
-    }
-
-    private function logInput($message)
-    {
-        $this->logMessage('USER', $message);
-    }
-
-    private function logOutput($message)
-    {
-        $this->logMessage('ASSISTANT', $message);
-    }
-
-    private function logMessage($type, $message)
-    {
-        $timestamp = date('[Y-m-d H:i:s]');
-        $logEntry  = '';
-
-        if ($type === 'OLLAMA') {
-            $message            = str_replace(["\r\n", "\r"], "\n", $message);
-            $this->ollamaBuffer .= $message;
-
-            $lines              = explode("\n", $this->ollamaBuffer);
-            $this->ollamaBuffer = array_pop($lines);
-
-            foreach ($lines as $line) {
-                if ($this->isFirstOllamaLine) {
-                    $logEntry                .= "{$timestamp} OLLAMA: {$line}\n";
-                    $this->isFirstOllamaLine = false;
-                } else {
-                    $logEntry .= "{$line}\n";
-                }
-            }
-        } else {
-            $logEntry = "{$timestamp} {$type}: {$message}\n";
+        if (!isset($response['response'])) {
+            return;
         }
 
-        $this->logBuffer .= $logEntry;
+        $chunk = $response['response'];
+        echo $chunk; // 实时输出到终端
+        $this->buffer             .= $chunk;
+        $this->finalReviewContent = $this->buffer; // 实时更新最终内容
+
+        $this->logMessage('OLLAMA', $chunk);
+
+        // 强制立即刷新输出缓冲区
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+
+        if (!empty($response['done'])) {
+            $this->logInput("Ollama生成完成，内容长度: " . strlen($this->buffer));
+            $this->buffer            = '';
+            $this->isFirstOllamaLine = true;
+        }
+    }
+
+    // 日志记录方法
+    private function logMessage($type, $message)
+    {
+        $timestamp        = date('[Y-m-d H:i:s]');
+        $formattedMessage = $this->formatLogMessage($type, $message, $timestamp);
+        $this->logBuffer  .= $formattedMessage;
 
         if (strlen($this->logBuffer) >= self::LOG_FLUSH_LIMIT / 2) {
             $this->flushLogBuffer();
         }
     }
 
-
-    private function handleStreamResponse(array $response)
+    // 格式化日志消息
+    private function formatLogMessage($type, $message, $timestamp)
     {
-        if (isset($response['response'])) {
-            $chunk = $response['response'];
-            echo $chunk;
-            $this->buffer             .= $chunk;
-            $this->finalReviewContent = $this->buffer; // 实时更新最终内容
-
-            $this->logMessage('OLLAMA', $chunk);
-
-            if (isset($response['done']) && $response['done']) {
-                $this->logInput("Ollama生成完成，内容长度: " . strlen($this->buffer));
-                $this->buffer            = '';
-                $this->isFirstOllamaLine = true;
-            }
-        }
-    }
-
-    public function __destruct()
-    {
-        if (!empty($this->ollamaBuffer)) {
-            $timestamp = date('[Y-m-d H:i:s]');
-            $padding   = $this->isFirstOllamaLine ? '' : str_repeat(' ', strlen($timestamp) + 11);
-            $logEntry  = $this->isFirstOllamaLine
-                ? "{$timestamp} OLLAMA: {$this->ollamaBuffer}\n"
-                : "{$padding}{$this->ollamaBuffer}\n";
-
-            $this->logBuffer    .= $logEntry;
-            $this->ollamaBuffer = '';
+        if ($type !== 'OLLAMA') {
+            return "{$timestamp} {$type}: {$message}\n";
         }
 
-        $this->flushLogBuffer();
-    }
+        $message            = str_replace(["\r\n", "\r"], "\n", $message);
+        $this->ollamaBuffer .= $message;
+        $lines              = explode("\n", $this->ollamaBuffer);
+        $this->ollamaBuffer = array_pop($lines);
 
-    private function flushLogBuffer()
-    {
-        if (!empty($this->logBuffer)) {
-            $retry = 0;
-            while ($retry < 3) {
-                $bytes = @file_put_contents($this->logFile, $this->logBuffer, FILE_APPEND);
-                if ($bytes !== false) {
-                    break;
-                }
-                usleep(100000);
-                $retry++;
-            }
-
-            if ($bytes === false) {
-                error_log("日志写入失败: " . $this->logFile);
+        $logEntry = '';
+        foreach ($lines as $line) {
+            if ($this->isFirstOllamaLine) {
+                $logEntry                .= "{$timestamp} OLLAMA: {$line}\n";
+                $this->isFirstOllamaLine = false;
             } else {
-                chmod($this->logFile, 0640);
-                $this->logBuffer = '';
+                $logEntry .= "{$line}\n";
             }
+        }
+
+        return $logEntry;
+    }
+
+    // 提交当前评审到GitHub
+    public function submitCurrentReview()
+    {
+        if (empty(trim($this->finalReviewContent))) {
+            throw new RuntimeException("没有可用的评审内容");
+        }
+
+        try {
+            $this->postGitHubComment($this->finalReviewContent);
+            $this->logInput("已成功提交评审到PR评论");
+        } catch (Exception $e) {
+            $this->logInput("提交评审失败: " . $e->getMessage());
+            throw $e;
         }
     }
 
+    // 发送GitHub评论
     private function postGitHubComment($commentBody)
     {
         $parsed    = parse_url($this->prUrl);
         $pathParts = explode('/', trim($parsed['path'] ?? '', '/'));
+        $owner     = $pathParts[0];
+        $repo      = $pathParts[1];
+        $prNumber  = $pathParts[3];
 
-        $owner    = $pathParts[0];
-        $repo     = $pathParts[1];
-        $prNumber = $pathParts[3];
-
-        $apiUrl = "https://api.github.com/repos/{$owner}/{$repo}/issues/{$prNumber}/comments";
-
+        $apiUrl  = "https://api.github.com/repos/{$owner}/{$repo}/issues/{$prNumber}/comments";
         $context = stream_context_create([
             'http' => [
                 'method'        => 'POST',
@@ -335,13 +332,12 @@ class MyCRB
         ]);
 
         $response = @file_get_contents($apiUrl, false, $context);
-
         if ($response === false) {
             $error = error_get_last();
             throw new RuntimeException("评论提交失败: {$error['message']}");
         }
 
-        $statusCode = explode(' ', $http_response_header[0] ?? '')[1] ?? 0;
+        $statusCode = $this->getStatusCodeFromHeader($http_response_header);
         if ($statusCode < 200 || $statusCode >= 300) {
             throw new RuntimeException("GitHub API返回错误: HTTP {$statusCode} - " . substr($response, 0, 512));
         }
@@ -349,35 +345,15 @@ class MyCRB
         return json_decode($response, true);
     }
 
-
-    public function submitCurrentReview()
-    {
-        if (empty(trim($this->finalReviewContent))) {
-            $this->logInput("警告：尝试提交空评审内容");
-            throw new RuntimeException("没有可用的评审内容，请检查Ollama服务状态或日志");
-        }
-
-        try {
-            $this->postGitHubComment($this->finalReviewContent);
-            $this->logInput("已成功提交评审到PR评论");
-        } catch (Exception $e) {
-            $this->logInput("提交评审失败: " . $e->getMessage());
-            throw $e;
-        }
-    }
-
+    // 提交历史评审
     public function submitPreviousReview()
     {
         $logDir     = $this->config['log_dir'];
         $prFilename = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
         $pattern    = '/^' . preg_quote($prFilename, '/') . '\+\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.log$/';
-
-        $files = [];
-        foreach (scandir($logDir) as $file) {
-            if (preg_match($pattern, $file)) {
-                $files[] = $file;
-            }
-        }
+        $files      = array_filter(scandir($logDir), function ($file) use ($pattern) {
+            return preg_match($pattern, $file);
+        });
 
         if (empty($files)) {
             $this->logInput("未找到任何历史评审记录");
@@ -390,6 +366,7 @@ class MyCRB
 
         $currentLog   = basename($this->logFile);
         $previousFile = null;
+
         foreach ($files as $file) {
             if ($file != $currentLog) {
                 $previousFile = $file;
@@ -415,6 +392,71 @@ class MyCRB
         $this->logInput("历史评审已成功提交到PR评论");
         return true;
     }
+
+    // 析构函数确保日志写入
+    public function __destruct()
+    {
+        if (!empty($this->ollamaBuffer)) {
+            $timestamp = date('[Y-m-d H:i:s]');
+            $padding   = $this->isFirstOllamaLine ? '' : str_repeat(' ', strlen($timestamp) + 11);
+            $logEntry  = $this->isFirstOllamaLine
+                ? "{$timestamp} OLLAMA: {$this->ollamaBuffer}\n"
+                : "{$padding}{$this->ollamaBuffer}\n";
+
+            $this->logBuffer    .= $logEntry;
+            $this->ollamaBuffer = '';
+        }
+
+        $this->flushLogBuffer();
+    }
+
+    // 刷新日志缓冲区
+    private function flushLogBuffer()
+    {
+        if (empty($this->logBuffer)) {
+            return;
+        }
+
+        $retry = 0;
+        while ($retry < 3) {
+            $bytes = @file_put_contents($this->logFile, $this->logBuffer, FILE_APPEND);
+            if ($bytes !== false) {
+                chmod($this->logFile, 0640);
+                $this->logBuffer = '';
+                return;
+            }
+            usleep(100000);
+            $retry++;
+        }
+
+        error_log("日志写入失败: " . $this->logFile);
+    }
+
+    // 错误处理
+    private function handleError(Exception $e)
+    {
+        $message = "Error [{$e->getCode()}]: {$e->getMessage()}";
+        echo $message . PHP_EOL;
+        $this->logInput($message);
+    }
+
+    // 记录用户输入日志
+    private function logInput($message)
+    {
+        $this->logMessage('USER', $message);
+    }
+
+    // 记录diff内容日志
+    private function logDiff($content)
+    {
+        $this->logMessage('DIFF', "PR Diff Content:\n" . $content);
+    }
+
+    // 记录系统输出日志
+    private function logOutput($message)
+    {
+        $this->logMessage('ASSISTANT', $message);
+    }
 }
 
 // CLI入口
@@ -423,13 +465,10 @@ if (php_sapi_name() === 'cli') {
         die("需要PHP 7.3或更高版本\n");
     }
 
-    $prUrl    = null;
-    $postType = null;
-
-    // 解析命令行参数
     $args = $_SERVER['argv'];
     array_shift($args); // 移除脚本名称
 
+    $prUrl = $postType = null;
     foreach ($args as $i => $arg) {
         if ($arg === '-p' && isset($args[$i + 1])) {
             $postType = $args[$i + 1];
