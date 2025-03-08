@@ -12,11 +12,13 @@
 - ✅ 自动生成带时间戳的日志
 - ✅ 上下文长度可配置
 - ✅ 支持多种开源大模型
+- ✅ **新增** 历史评审提交功能（支持`-p pre`参数）
+- ✅ **新增** 立即提交模式（`-p now`参数）
 
 ## 环境要求
 
 - PHP 7.3+
-- Ollama服务（推荐v0.5.13 or latest）
+- Ollama服务（推荐v0.5.13或最新版）
 - cURL扩展
 - JSON扩展
 
@@ -25,18 +27,17 @@
 ### 1. 安装依赖
 
 ```bash
-https://github.com/ollama/ollama
 # 安装Ollama（macOS）
 https://ollama.com/download/Ollama-darwin.zip
+
 # 安装Ollama（Windows）
 https://ollama.com/download/OllamaSetup.exe
+
 # 下载模型（示例使用qwen2.5-coder:14b）
 ollama pull qwen2.5-coder:14b
 ```
 
 ### 2. 项目配置
-
-复制示例配置文件：
 
 ```bash
 cp config/code_review_example.php config/code_review.php
@@ -48,51 +49,58 @@ cp config/code_review_example.php config/code_review.php
 return [
     'github_token'   => '你的GitHub Token',    // 需要repo权限
     'ollama_host'    => 'http://localhost:11434',
-    'model_name'     => 'qwen2.5-coder:14b',       // 支持的模型名称
+    'model_name'     => 'qwen2.5-coder:14b',   // 支持的模型名称
     'context_length' => 1024*8,                // 上下文长度（token数）
-    'log_dir' => dirname(__DIR__) . '/logs', // 日志目录
-    'prompt' => <<<PROMPT                    // 自定义提示词
-    // ...保持默认提示词结构...
+    'log_dir'        => dirname(__DIR__) . '/logs', // 日志目录
+    'model_params'   => [
+        'temperature'    => 0.1,  // 值越低输出越稳定（0.0-1.0）
+        'top_p'          => 0.9,       // 控制采样范围（0.8-0.95最佳）
+        'repeat_penalty' => 1.1 // 防止重复输出（1.0-1.2之间）
+    ],
+    'prompt' => <<<PROMPT
+    // 自定义提示词模板...
+    PROMPT
 ];
 ```
 
 ### 3. 运行审查
 
 ```bash
+# 基础用法
 php MyCRB.php https://github.com/username/repo/pull/123
+
+# 立即生成并提交评审
+php MyCRB.php https://github.com/username/repo/pull/123 -p now
+
+# 提交历史评审记录
+php MyCRB.php https://github.com/username/repo/pull/123 -p pre
 ```
 
 ## 使用示例
 
 ```bash
-$ php MyCRB.php https://github.com/example/test-repo/pull/42
+# 提交历史评审示例
+$ php MyCRB.php https://github.com/example/test-repo/pull/42 -p pre
+⚠️ 未找到历史评审记录，已生成新评审内容但未提交。使用 -p pre 提交本次结果；或使用 -p now 重新生成并提交
 
+# 强制立即提交示例
+$ php MyCRB.php https://github.com/example/test-repo/pull/42 -p now
 ✅ 接受 更改分数：85
-主要改进建议：
-1. 在UserController.php第32行，建议添加输入验证：
-   ```php
-   + if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-   +     throw new InvalidArgumentException("无效的邮箱格式");
-   + }
-2. 数据库查询建议使用参数绑定防止SQL注入
-   ```
-
-...
-
+[提交成功] 评审已发布到GitHub PR #42
 ```
 
 ## 日志系统
 
 审查过程会自动生成日志文件：
-```
 
+```
 logs/
 ├── https___github.com_example_repo_pull_20+2024.03.08.log
 └── https___github.com_test_project_pull_15+2024.03.07.log
-
 ```
 
 日志包含：
+
 - 完整的差异内容
 - AI响应流
 - 执行时间统计
@@ -100,14 +108,34 @@ logs/
 
 ## 配置说明
 
-| 配置项           | 说明                                                                 |
-|------------------|--------------------------------------------------------------------|
-| github_token     | GitHub个人访问令牌（需repo权限）                                     |
-| ollama_host      | Ollama服务地址（默认http://localhost:11434）                        |
-| model_name       | 使用的模型名称（需提前通过ollama pull下载）                           |
-| context_length   | 模型上下文长度（建议设为模型最大支持值）                               |
-| log_dir          | 日志存储目录（需写权限）                                              |
-| prompt           | 审查提示词模板（{diff}占位符会自动替换为PR差异）                       |
+| 配置项            | 说明                                          |
+|----------------|---------------------------------------------|
+| github_token   | GitHub个人访问令牌（需repo权限）                       |
+| ollama_host    | Ollama服务地址（默认`http://localhost:11434`）      |
+| model_name     | 使用的模型名称（需提前通过`ollama pull`下载）               |
+| context_length | 模型上下文长度（建议设为模型最大支持值）                        |
+| log_dir        | 日志存储目录（需写权限）                                |
+| prompt         | 审查提示词模板（`{diff}`占位符会自动替换为PR差异）              |
+| **命令行参数**      | `-p now`：立即生成并提交评审<br>`-p pre`：提交最近一次历史评审记录 |
+
+## 审查模式对比
+
+| 模式     | 生成内容 | 提交行为    | 日志记录 |
+|--------|------|---------|------|
+| 无参数    | ✓    | ✗       | ✓    |
+| -p now | ✓    | ✓（强制覆盖） | ✓    |
+| -p pre | ✗    | ✓（历史记录） | ✓    |
+
+## 日志关联功能
+
+当使用 `-p pre` 参数时，系统会自动：
+
+1. 搜索与当前PR关联的历史日志文件
+2. 按时间倒序选择最近的有效评审记录
+3. 自动格式化历史评审内容到GitHub评论
+
+日志文件命名规则：  
+`{PR_URL_sanitized}+{timestamp}.log`（示例：`https___github.com_project_pull_42+2024.03.08.15.30.00.log`）
 
 ## 注意事项
 
@@ -130,3 +158,8 @@ logs/
 4. 大模型响应速度参考：
     - 14B模型：约5-15秒/请求
     - 32B模型：约20-40秒/请求
+
+5. 参数使用规范：
+    - `-p now` 会强制重新生成评审内容并立即提交
+    - `-p pre` 会尝试提交最近一次成功生成的评审记录
+    - 未指定参数时仅生成评审内容不提交
