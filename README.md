@@ -1,4 +1,3 @@
-
 # MyCR-Buddy - AI代码审查助手
 
 [![PHP Version](https://img.shields.io/badge/PHP-7.3%2B-blue.svg)](https://php.net/)
@@ -31,23 +30,25 @@ https://github.com/ollama/ollama
 https://ollama.com/download/Ollama-darwin.zip
 # 安装Ollama（Windows）
 https://ollama.com/download/OllamaSetup.exe
-# 下载模型（示例使用qwen2.5）
-ollama pull qwen2.5:14b
+# 下载模型（示例使用qwen2.5-coder:14b）
+ollama pull qwen2.5-coder:14b
 ```
 
 ### 2. 项目配置
 
 复制示例配置文件：
+
 ```bash
 cp config/code_review_example.php config/code_review.php
 ```
 
 编辑配置文件 `config/code_review.php`：
+
 ```php
 return [
     'github_token'   => '你的GitHub Token',    // 需要repo权限
     'ollama_host'    => 'http://localhost:11434',
-    'model_name'     => 'qwen2.5:14b',       // 支持的模型名称
+    'model_name'     => 'qwen2.5-coder:14b',       // 支持的模型名称
     'context_length' => 1024*8,                // 上下文长度（token数）
     'log_dir' => dirname(__DIR__) . '/logs', // 日志目录
     'prompt' => <<<PROMPT                    // 自定义提示词
@@ -56,6 +57,7 @@ return [
 ```
 
 ### 3. 运行审查
+
 ```bash
 php MyCRB.php https://github.com/username/repo/pull/123
 ```
@@ -74,16 +76,20 @@ $ php MyCRB.php https://github.com/example/test-repo/pull/42
    + }
 2. 数据库查询建议使用参数绑定防止SQL注入
    ```
-   ...
+
+...
+
 ```
 
 ## 日志系统
 
 审查过程会自动生成日志文件：
 ```
+
 logs/
 ├── https___github.com_example_repo_pull_20+2024.03.08.log
 └── https___github.com_test_project_pull_15+2024.03.07.log
+
 ```
 
 日志包含：
@@ -108,10 +114,10 @@ logs/
 1. 首次使用需要下载模型（根据网络情况可能需要较长时间）：
    ```bash
    # 14B量化版（推荐）
-   ollama pull qwen2.5:14b
+   ollama pull qwen2.5-coder:14b
    
    # 32B完整版（需要32G+内存）
-   ollama pull qwen2.5:32b
+   ollama pull qwen2.5-coder:32b
    ```
 
 2. 建议为Ollama配置GPU加速（需NVIDIA显卡和CUDA环境）
