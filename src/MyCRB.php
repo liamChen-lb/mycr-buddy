@@ -163,8 +163,13 @@ class MyCRB
     }
 
     // 调用Ollama生成评审内容
+    // 修改callOllama方法来动态设置上下文
     private function callOllama($diffContent)
     {
+        $tokenCount = $this->ollamaService->countTokens($diffContent);
+        if ($tokenCount > $this->config['context_length']) {
+            throw new RuntimeException("代码的token数量超过了配置中的最大上下文长度");
+        }
         $this->logHandler->logMessage('PROMPT', $this->config['prompt']);
         $this->ollamaService->generateReview(
             $diffContent,
@@ -368,7 +373,8 @@ class MyCRB
     // 记录diff内容日志
     private function logDiff($content)
     {
-        $this->logMessage('DIFF', "PR Diff Content:\n" . $content);
+        $tokenCount = $this->ollamaService->countTokens($content);
+        $this->logMessage('DIFF', "PR Diff Content:\n" . $content . "\nToken Count: " . $tokenCount);
     }
 
     // 记录系统输出日志
