@@ -6,7 +6,7 @@ return [
     // 若32b执行较慢，可以尝试14b
     'model_name'     => 'qwen2.5-coder:14b',
     //    'model_name'     => 'qwen2.5:32b',
-    'context_length' => 1024 * 8,
+    'context_length' => 1024 * 8,// 最大上下文
     'log_dir'        => dirname(__DIR__) . '/logs',
     'model_params'   => [
         'temperature'    => 0.1,  // 值越低输出越稳定（0.0-1.0）
