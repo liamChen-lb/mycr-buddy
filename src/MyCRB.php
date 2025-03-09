@@ -6,12 +6,6 @@ use Exception;
 use MyCRB\Handlers\LogHandler;
 use MyCRB\Services\GitHubService;
 use MyCRB\Services\OllamaService;
-
-// 移除错误的autoload引入
-// require_once __DIR__ . '/vendor/autoload.php';
-
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\GuzzleException;
 use RuntimeException;
 
 class MyCRB
@@ -64,17 +58,18 @@ class MyCRB
     {
         $safeUrl   = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
         $timestamp = date('Y.m.d.H.i.s');
-        
+
         // 确保日志目录存在
         $this->ensureDirExists($this->config['log_dir']);
-        
+
         // 生成完整日志文件路径
-        $this->logFile = sprintf('%s/%s+%s.log', 
+        $this->logFile = sprintf(
+            '%s/%s+%s.log',
             rtrim($this->config['log_dir'], '/'),
             $safeUrl,
             $timestamp
         );
-        
+
         // 二次验证文件路径格式
         if (is_dir($this->logFile)) {
             throw new RuntimeException("生成的日志路径是目录: {$this->logFile}");
@@ -243,17 +238,19 @@ class MyCRB
     // 发送GitHub评论
     private function postGitHubComment($commentBody)
     {
-        $parsed = parse_url($this->prUrl);
+        $parsed    = parse_url($this->prUrl);
         $pathParts = explode('/', trim($parsed['path'] ?? '', '/'));
-        
+
         // 记录调试信息
-        $this->logInput(sprintf(
-            '正在提交评论到：owner=%s, repo=%s, pr=%s',
-            $pathParts[0],
-            $pathParts[1],
-            $pathParts[3]
-        ));
-        
+        $this->logInput(
+            sprintf(
+                '正在提交评论到：owner=%s, repo=%s, pr=%s',
+                $pathParts[0],
+                $pathParts[1],
+                $pathParts[3]
+            )
+        );
+
         try {
             $this->githubService->postComment(
                 $pathParts[0], // owner
