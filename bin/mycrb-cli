@@ -1,10 +1,10 @@
 #!/usr/bin/env php
 <?php
 
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__ . '/../vendor/autoload.php';
 
-if (PHP_VERSION_ID < 70300) {
-    die("需要PHP 7.3或更高版本\n");
+if (PHP_VERSION_ID < 80100) {
+    die("需要PHP 8.1或更高版本\n");
 }
 
 $args = $_SERVER['argv'];

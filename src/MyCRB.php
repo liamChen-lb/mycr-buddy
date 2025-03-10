@@ -166,9 +166,14 @@ class MyCRB
     // 修改callOllama方法来动态设置上下文
     private function callOllama($diffContent)
     {
-        $tokenCount = $this->ollamaService->countTokens($diffContent);
+        $diffTokenCount   = $this->ollamaService->countTokens($diffContent);
+        $promptTokenCount = $this->ollamaService->countTokens($this->config['prompt']);
+        // 这里还需要考虑prompt的长度
+        $tokenCount = $diffTokenCount + $promptTokenCount;
         if ($tokenCount > $this->config['context_length']) {
-            throw new RuntimeException("代码的token数量超过了配置中的最大上下文长度");
+            throw new RuntimeException(
+                "代码+Prompt的token数量超过了配置中的最大上下文长度, 代码：$tokenCount ，prompt：$promptTokenCount"
+            );
         }
         $this->logHandler->logMessage('PROMPT', $this->config['prompt']);
         $this->ollamaService->generateReview(

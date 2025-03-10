@@ -2,6 +2,8 @@
 
 namespace MyCRB\Services;
 
+use Yethee\Tiktoken\EncoderProvider;
+
 class OllamaService
 {
     private $config;
@@ -13,9 +15,10 @@ class OllamaService
 
     public function generateReview(string $diffContent, callable $streamHandler): string
     {
-        $prompt               = str_replace('{diff}', $diffContent, $this->config['prompt']);
-        $tokenCount           = $this->countTokens($diffContent);
-        $dynamicContextLength = min($tokenCount + 1024, $this->config['context_length']);
+        $prompt     = str_replace('{diff}', $diffContent, $this->config['prompt']);
+        $tokenCount = $this->countTokens($prompt);
+        // 动态设置上下文长度，避免超出模型最大长度；并且考虑了prompt的占用，增加128作为冗余
+        $dynamicContextLength = min($tokenCount + 128, $this->config['context_length']);
         $modelOptions         = array_merge([
             'temperature'    => 0.1,
             'top_p'          => 0.9,
@@ -70,8 +73,9 @@ class OllamaService
      */
     public function countTokens(string $code): int
     {
-        $tokenizer = $this->getTokenizer($this->config['model_name']);
-        $tokens    = $tokenizer($code);
-        return count($tokens);
+        // 先统一使用 EncoderProvider 来分词，并且使用 'gpt-3.5-turbo-0301'模型
+        $encoder = (new EncoderProvider())->getForModel('gpt-3.5-turbo-0301');
+
+        return count($encoder->encode($code));
     }
 }
