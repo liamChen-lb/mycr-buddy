@@ -1,23 +1,37 @@
 <?php
 
+namespace MyCRB;
+
+use Exception;
+use MyCRB\Handlers\LogHandler;
+use MyCRB\Services\GitHubService;
+use MyCRB\Services\OllamaService;
+use RuntimeException;
+
 class MyCRB
 {
     private $config;
-    private $logFile;
     private $prUrl;
-    private $buffer = '';
-    private $logBuffer = '';
-    private const LOG_FLUSH_LIMIT = 4096;
-    private $ollamaBuffer = '';
-    private $isFirstOllamaLine = true;
     private $finalReviewContent = '';
+    private $githubService;
+    private $ollamaService;
+    private $logHandler;
+
+    private $buffer = '';
+
+    private $ollamaBuffer = '';
+    private $logBuffer = '';
+    private $isFirstOllamaLine = true;
+    private $logFile;
 
     // 构造函数初始化配置和输出缓冲
     public function __construct()
     {
-        $this->config = require __DIR__ . '/config/code_review.php';
+        $this->config = require __DIR__ . '/../config/code_review.php';
         $this->validateConfig();
-        ob_start(); // 启用输出缓冲
+        $this->githubService = new GitHubService($this->config);
+        $this->ollamaService = new OllamaService($this->config);
+        ob_start();
     }
 
     // 验证配置完整性
@@ -42,10 +56,24 @@ class MyCRB
     // 初始化日志文件路径
     private function initLogFile()
     {
-        $safeUrl       = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
-        $timestamp     = date('Y.m.d.H.i.s');
-        $this->logFile = "{$this->config['log_dir']}/{$safeUrl}+{$timestamp}.log";
-        $this->ensureDirExists(dirname($this->logFile));
+        $safeUrl   = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
+        $timestamp = date('Y.m.d.H.i.s');
+
+        // 确保日志目录存在
+        $this->ensureDirExists($this->config['log_dir']);
+
+        // 生成完整日志文件路径
+        $this->logFile = sprintf(
+            '%s/%s+%s.log',
+            rtrim($this->config['log_dir'], '/'),
+            $safeUrl,
+            $timestamp
+        );
+
+        // 二次验证文件路径格式
+        if (is_dir($this->logFile)) {
+            throw new RuntimeException("生成的日志路径是目录: {$this->logFile}");
+        }
     }
 
     // 确保日志目录存在且可写
@@ -67,6 +95,7 @@ class MyCRB
         set_time_limit(600); // 设置最长执行时间
         $this->prUrl = $prUrl;
         $this->initLogFile();
+        $this->logHandler = new LogHandler($this->logFile);
         $this->logInput("Command: " . implode(' ', $_SERVER['argv']));
         $this->logInput("Starting review for PR: {$prUrl}");
 
@@ -119,40 +148,7 @@ class MyCRB
     // 获取GitHub PR的diff内容
     private function getGitHubDiff()
     {
-        $parsed    = parse_url($this->prUrl);
-        $pathParts = explode('/', trim($parsed['path'] ?? '', '/'));
-
-        if (count($pathParts) < 4 || $pathParts[2] !== 'pull') {
-            throw new InvalidArgumentException("无效的PR URL格式");
-        }
-
-        list($owner, $repo, , $prNumber) = $pathParts;
-        $apiUrl = "https://api.github.com/repos/{$owner}/{$repo}/pulls/{$prNumber}";
-
-        $context = stream_context_create([
-            'http' => [
-                'method'        => 'GET',
-                'header'        => [
-                    "User-Agent: PHP-PR-Reviewer/1.0",
-                    "Authorization: Bearer {$this->config['github_token']}",
-                    "Accept: application/vnd.github.v3.diff"
-                ],
-                'ignore_errors' => true
-            ]
-        ]);
-
-        $response = @file_get_contents($apiUrl, false, $context);
-        if ($response === false) {
-            $error = error_get_last();
-            throw new RuntimeException("GitHub API请求失败: {$error['message']}");
-        }
-
-        $statusCode = $this->getStatusCodeFromHeader($http_response_header);
-        if ($statusCode != 200) {
-            throw new RuntimeException("GitHub API返回错误: HTTP {$statusCode} - " . substr($response, 0, 512));
-        }
-
-        return $response;
+        return $this->githubService->getDiff($this->prUrl);
     }
 
     // 从响应头解析HTTP状态码
@@ -167,52 +163,18 @@ class MyCRB
     }
 
     // 调用Ollama生成评审内容
+    // 修改callOllama方法来动态设置上下文
     private function callOllama($diffContent)
     {
-        $prompt       = str_replace('{diff}', $diffContent, $this->config['prompt']);
-        $modelOptions = array_merge([
-            'temperature'    => 0.1,
-            'top_p'          => 0.9,
-            'repeat_penalty' => 1.1
-        ], $this->config['model_params'] ?? []);
-
-        $maxRetries = 3;
-        $retryCount = 0;
-
-        while ($retryCount < $maxRetries) {
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL            => rtrim($this->config['ollama_host'], '/') . '/api/generate',
-                CURLOPT_POST           => true,
-                CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-                CURLOPT_POSTFIELDS     => json_encode([
-                    'model'   => $this->config['model_name'],
-                    'prompt'  => $prompt,
-                    'stream'  => true,
-                    'options' => array_merge([
-                        'num_ctx' => $this->config['context_length']
-                    ], $modelOptions)
-                ]),
-                CURLOPT_RETURNTRANSFER => false,
-                CURLOPT_WRITEFUNCTION  => $this->getStreamHandler(),
-                CURLOPT_TIMEOUT        => 300,
-                CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_2_0,
-                CURLOPT_TCP_NODELAY    => true
-            ]);
-
-            $success = curl_exec($ch);
-            curl_close($ch);
-
-            if ($success) {
-                return;
-            }
-
-            $retryCount++;
-            $this->logInput("Ollama调用失败，重试次数：{$retryCount}/{$maxRetries}");
-            sleep(1);
+        $tokenCount = $this->ollamaService->countTokens($diffContent);
+        if ($tokenCount > $this->config['context_length']) {
+            throw new RuntimeException("代码的token数量超过了配置中的最大上下文长度");
         }
-
-        throw new RuntimeException("Ollama服务调用失败，已达到最大重试次数");
+        $this->logHandler->logMessage('PROMPT', $this->config['prompt']);
+        $this->ollamaService->generateReview(
+            $diffContent,
+            $this->getStreamHandler()
+        );
     }
 
     // 获取流式响应处理回调
@@ -257,39 +219,10 @@ class MyCRB
     // 日志记录方法
     private function logMessage($type, $message)
     {
-        $timestamp        = date('[Y-m-d H:i:s]');
-        $formattedMessage = $this->formatLogMessage($type, $message, $timestamp);
-        $this->logBuffer  .= $formattedMessage;
-
-        if (strlen($this->logBuffer) >= self::LOG_FLUSH_LIMIT / 2) {
-            $this->flushLogBuffer();
-        }
+        $this->logHandler->logMessage($type, $message);
     }
 
     // 格式化日志消息
-    private function formatLogMessage($type, $message, $timestamp)
-    {
-        if ($type !== 'OLLAMA') {
-            return "{$timestamp} {$type}: {$message}\n";
-        }
-
-        $message            = str_replace(["\r\n", "\r"], "\n", $message);
-        $this->ollamaBuffer .= $message;
-        $lines              = explode("\n", $this->ollamaBuffer);
-        $this->ollamaBuffer = array_pop($lines);
-
-        $logEntry = '';
-        foreach ($lines as $line) {
-            if ($this->isFirstOllamaLine) {
-                $logEntry                .= "{$timestamp} OLLAMA: {$line}\n";
-                $this->isFirstOllamaLine = false;
-            } else {
-                $logEntry .= "{$line}\n";
-            }
-        }
-
-        return $logEntry;
-    }
 
     // 提交当前评审到GitHub
     public function submitCurrentReview()
@@ -312,37 +245,28 @@ class MyCRB
     {
         $parsed    = parse_url($this->prUrl);
         $pathParts = explode('/', trim($parsed['path'] ?? '', '/'));
-        $owner     = $pathParts[0];
-        $repo      = $pathParts[1];
-        $prNumber  = $pathParts[3];
 
-        $apiUrl  = "https://api.github.com/repos/{$owner}/{$repo}/issues/{$prNumber}/comments";
-        $context = stream_context_create([
-            'http' => [
-                'method'        => 'POST',
-                'header'        => [
-                    "User-Agent: PHP-PR-Reviewer/1.0",
-                    "Authorization: Bearer {$this->config['github_token']}",
-                    "Accept: application/vnd.github.v3+json",
-                    "Content-Type: application/json"
-                ],
-                'content'       => json_encode(['body' => $commentBody]),
-                'ignore_errors' => true
-            ]
-        ]);
+        // 记录调试信息
+        $this->logInput(
+            sprintf(
+                '正在提交评论到：owner=%s, repo=%s, pr=%s',
+                $pathParts[0],
+                $pathParts[1],
+                $pathParts[3]
+            )
+        );
 
-        $response = @file_get_contents($apiUrl, false, $context);
-        if ($response === false) {
-            $error = error_get_last();
-            throw new RuntimeException("评论提交失败: {$error['message']}");
+        try {
+            $this->githubService->postComment(
+                $pathParts[0], // owner
+                $pathParts[1], // repo
+                (int)$pathParts[3], // prNumber转换为整数
+                $commentBody
+            );
+        } catch (\RuntimeException $e) {
+            $this->logInput('GitHub API错误详情：' . $e->getMessage());
+            throw $e;
         }
-
-        $statusCode = $this->getStatusCodeFromHeader($http_response_header);
-        if ($statusCode < 200 || $statusCode >= 300) {
-            throw new RuntimeException("GitHub API返回错误: HTTP {$statusCode} - " . substr($response, 0, 512));
-        }
-
-        return json_decode($response, true);
     }
 
     // 提交历史评审
@@ -407,7 +331,7 @@ class MyCRB
             $this->ollamaBuffer = '';
         }
 
-        $this->flushLogBuffer();
+        $this->logHandler->flushLog();
     }
 
     // 刷新日志缓冲区
@@ -449,44 +373,13 @@ class MyCRB
     // 记录diff内容日志
     private function logDiff($content)
     {
-        $this->logMessage('DIFF', "PR Diff Content:\n" . $content);
+        $tokenCount = $this->ollamaService->countTokens($content);
+        $this->logMessage('DIFF', "PR Diff Content:\n" . $content . "\nToken Count: " . $tokenCount);
     }
 
     // 记录系统输出日志
     private function logOutput($message)
     {
         $this->logMessage('ASSISTANT', $message);
-    }
-}
-
-// CLI入口
-if (php_sapi_name() === 'cli') {
-    if (PHP_VERSION_ID < 70300) {
-        die("需要PHP 7.3或更高版本\n");
-    }
-
-    $args = $_SERVER['argv'];
-    array_shift($args); // 移除脚本名称
-
-    $prUrl = $postType = null;
-    foreach ($args as $i => $arg) {
-        if ($arg === '-p' && isset($args[$i + 1])) {
-            $postType = $args[$i + 1];
-            unset($args[$i], $args[$i + 1]);
-            break;
-        }
-    }
-
-    if (empty($args)) {
-        die("使用方法: php " . basename(__FILE__) . " <PR_URL> [-p now|pre]\n");
-    }
-
-    $prUrl = array_shift($args);
-
-    try {
-        $reviewer = new MyCRB();
-        $reviewer->run($prUrl, $postType);
-    } catch (Throwable $e) {
-        die("[致命错误] " . $e->getMessage() . PHP_EOL);
     }
 }

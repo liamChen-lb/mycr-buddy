@@ -14,6 +14,8 @@
 - ✅ 支持多种开源大模型
 - ✅ **新增** 历史评审提交功能（支持`-p pre`参数）
 - ✅ **新增** 立即提交模式（`-p now`参数）
+- ✅ **动态上下文计算**    根据代码差异自动调整模型上下文长度（`num_ctx = token_count + 1024`）
+- ✅ **多模型分词适配**    支持Qwen2.5模型专用分词器（正则优化）
 
 ## 环境要求
 
@@ -67,24 +69,24 @@ return [
 
 ```bash
 # 基础用法
-php MyCRB.php https://github.com/username/repo/pull/123
+./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1
 
 # 立即生成并提交评审
-php MyCRB.php https://github.com/username/repo/pull/123 -p now
+./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p now
 
 # 提交历史评审记录
-php MyCRB.php https://github.com/username/repo/pull/123 -p pre
+./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p pre
 ```
 
 ## 使用示例
 
 ```bash
 # 提交历史评审示例
-$ php MyCRB.php https://github.com/example/test-repo/pull/42 -p pre
+$ ./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p pre
 ⚠️ 未找到历史评审记录，已生成新评审内容但未提交。使用 -p pre 提交本次结果；或使用 -p now 重新生成并提交
 
 # 强制立即提交示例
-$ php MyCRB.php https://github.com/example/test-repo/pull/42 -p now
+$ ./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p now
 ✅ 接受 更改分数：85
 [提交成功] 评审已发布到GitHub PR #42
 ```
@@ -110,6 +112,7 @@ logs/
 
 | 配置项            | 说明                                          |
 |----------------|---------------------------------------------|
+| model_params   | 允许进一步设置模型参数，如温度、TopP等                       |
 | github_token   | GitHub个人访问令牌（需repo权限）                       |
 | ollama_host    | Ollama服务地址（默认`http://localhost:11434`）      |
 | model_name     | 使用的模型名称（需提前通过`ollama pull`下载）               |
