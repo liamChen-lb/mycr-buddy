@@ -69,24 +69,24 @@ return [
 
 ```bash
 # 基础用法
-php MyCRB.php https://github.com/username/repo/pull/123
+./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1
 
 # 立即生成并提交评审
-php MyCRB.php https://github.com/username/repo/pull/123 -p now
+./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p now
 
 # 提交历史评审记录
-php MyCRB.php https://github.com/username/repo/pull/123 -p pre
+./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p pre
 ```
 
 ## 使用示例
 
 ```bash
 # 提交历史评审示例
-$ php MyCRB.php https://github.com/example/test-repo/pull/42 -p pre
+$ ./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p pre
 ⚠️ 未找到历史评审记录，已生成新评审内容但未提交。使用 -p pre 提交本次结果；或使用 -p now 重新生成并提交
 
 # 强制立即提交示例
-$ php MyCRB.php https://github.com/example/test-repo/pull/42 -p now
+$ ./bin/mycrb-cli https://github.com/liamChen-lb/mycr-buddy/pull/1 -p now
 ✅ 接受 更改分数：85
 [提交成功] 评审已发布到GitHub PR #42
 ```

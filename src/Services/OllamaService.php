@@ -15,7 +15,7 @@ class OllamaService
     {
         $prompt               = str_replace('{diff}', $diffContent, $this->config['prompt']);
         $tokenCount           = $this->countTokens($diffContent);
-        $dynamicContextLength = $tokenCount + 1024;
+        $dynamicContextLength = min($tokenCount + 1024, $this->config['context_length']);
         $modelOptions         = array_merge([
             'temperature'    => 0.1,
             'top_p'          => 0.9,
@@ -58,7 +58,7 @@ class OllamaService
                 return function ($text) {
                     // 中文单独切分（通用优化）
                     $text = preg_replace('/\s+/u', ' ', $text);
-                    return preg_split('/(?<!^)(?!$)|[\x{4e00}-\x{9fff}]/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+                    return preg_split('/(\s+|[^\p{L}\p{N}_]+)/u', $text, -1, PREG_SPLIT_NO_EMPTY);
                 };
         }
     }
