@@ -16,7 +16,7 @@ class GitHubService
 
     public function getDiff(string $prUrl): string
     {
-        $parsed = parse_url($prUrl);
+        $parsed    = parse_url($prUrl);
         $pathParts = explode('/', trim($parsed['path'] ?? '', '/'));
 
         if (count($pathParts) < 4 || $pathParts[2] !== 'pull') {
@@ -26,30 +26,31 @@ class GitHubService
         list($owner, $repo, , $prNumber) = $pathParts;
         $apiUrl = "https://api.github.com/repos/{$owner}/{$repo}/pulls/{$prNumber}";
 
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'header' => [
-                    "User-Agent: PHP-PR-Reviewer/1.0",
-                    "Authorization: Bearer {$this->config['github_token']}",
-                    "Accept: application/vnd.github.v3.diff"
-                ],
-                'ignore_errors' => true
-            ]
+        $client = new Client([
+            'timeout' => 30 // 新增30秒超时设置
         ]);
 
-        $response = @file_get_contents($apiUrl, false, $context);
-        if ($response === false) {
-            $error = error_get_last();
-            throw new \RuntimeException("GitHub API请求失败: {$error['message']}");
-        }
+        try {
+            $response = $client->get($apiUrl, [
+                'headers'     => [
+                    "User-Agent"    => "PHP-PR-Reviewer/1.0",
+                    "Authorization" => "Bearer {$this->config['github_token']}",
+                    "Accept"        => "application/vnd.github.v3.diff"
+                ],
+                'http_errors' => false // 保持原有错误处理逻辑
+            ]);
 
-        $statusCode = $this->getStatusCodeFromHeader($http_response_header);
-        if ($statusCode != 200) {
-            throw new \RuntimeException("GitHub API返回错误: HTTP {$statusCode} - " . substr($response, 0, 512));
-        }
+            $statusCode = $response->getStatusCode();
+            if ($statusCode !== 200) {
+                throw new \RuntimeException(
+                    "GitHub API返回错误: HTTP {$statusCode} - " . $response->getBody()->getContents()
+                );
+            }
 
-        return $response;
+            return $response->getBody()->getContents();
+        } catch (GuzzleException $e) {
+            throw new \RuntimeException("GitHub API请求失败: " . $e->getMessage());
+        }
     }
 
     private function getStatusCodeFromHeader(array $headers): int
@@ -69,18 +70,20 @@ class GitHubService
         $client = new Client();
         try {
             $response = $client->post($apiUrl, [
-                'headers' => [
+                'headers'     => [
                     'Authorization' => 'Bearer ' . $this->config['github_token'],
-                    'Accept' => 'application/vnd.github.v3+json',
-                    'User-Agent' => 'MyCR-Buddy/1.0'
+                    'Accept'        => 'application/vnd.github.v3+json',
+                    'User-Agent'    => 'MyCR-Buddy/1.0'
                 ],
-                'json' => ['body' => $content],
+                'json'        => ['body' => $content],
                 'http_errors' => false
             ]);
 
             $statusCode = $response->getStatusCode();
             if ($statusCode !== 201) {
-                throw new \RuntimeException("GitHub评论提交失败: HTTP {$statusCode} - " . $response->getBody()->getContents());
+                throw new \RuntimeException(
+                    "GitHub评论提交失败: HTTP {$statusCode} - " . $response->getBody()->getContents()
+                );
             }
         } catch (GuzzleException $e) {
             throw new \RuntimeException("网络请求异常: " . $e->getMessage());
