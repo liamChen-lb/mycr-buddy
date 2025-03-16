@@ -22,8 +22,10 @@ class BatchManager
         ];
 
         foreach ($chunks as $chunk) {
-            $required = $chunk['token_count'] + 256; // 保留200token给系统prompt
+            // TODO: 这里的256应该作为一个参数或者配置项
+            $required = $chunk['token_count'] + 256; // 保留256token给系统prompt
 
+            // 大小超出，则需要分批
             if (($currentBatch['token_count'] + $required) > $this->contextLength) {
                 $batches[]    = $currentBatch;
                 $currentBatch = [

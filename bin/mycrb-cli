@@ -26,6 +26,8 @@ if (empty($args)) {
 $prUrl = array_shift($args);
 
 try {
+    // 先设置时区
+    date_default_timezone_set('Asia/Shanghai');
     $reviewer = new \MyCRB\MyCRB();
     $reviewer->run($prUrl, $postType);
 } catch (Throwable $e) {

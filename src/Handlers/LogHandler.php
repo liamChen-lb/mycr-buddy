@@ -6,13 +6,14 @@ class LogHandler
 {
 
     // 添加几个输出的常量，如[USER]等
-    const LOGOUT_FLAG_USER         = '[USER]';
-    const LOGOUT_FLAG_OLLAMA       = '[OLLAMA]';
-    const LOGOUT_FLAG_FINAL_REVIEW = '[FINAL_REVIEW]';
-    const LOGOUT_FLAG_BATCH_START  = '[BATCH START]';
-    const LOGOUT_FLAG_BATCH_DIFF   = '[BATCH DIFF START]';
-    const LOGOUT_FLAG_BATCH_END    = '[BATCH END]';
-    const LOGOUT_FLAG_BATCH_INFO   = '[BATCH_INFO]';
+    const LOGOUT_FLAG_USER           = '[USER]';
+    const LOGOUT_FLAG_OLLAMA         = '[OLLAMA]';
+    const LOGOUT_FLAG_FINAL_REVIEW   = '[FINAL_REVIEW]';
+    const LOGOUT_FLAG_BATCH_DIFF     = '[FULL_DIFF_START]';
+    const LOGOUT_FLAG_BATCH_END      = '[FULL_DIFF_END]';
+    const LOGOUT_FLAG_BATCH_INFO     = '[BATCH_INFO]';
+    const LOGOUT_FLAG_SUMMARY_PROMPT = '[SUMMARY_PROMPT]';
+    const LOGOUT_FLAG_PROMPT         = '[PROMPT]';
 
     private $logFile;
     private $logBuffer = '';
@@ -53,7 +54,7 @@ class LogHandler
     {
         $timestamp = date('[Y-m-d H:i:s]');
 
-        if ($type !== 'OLLAMA') {
+        if ($type !== self::LOGOUT_FLAG_OLLAMA) {
             return "{$timestamp} {$type}: {$message}\n";
         }
 
@@ -64,7 +65,7 @@ class LogHandler
         $output = '';
         foreach ($lines as $line) {
             if ($this->isFirstOllamaLine) {
-                $output                  .= "{$timestamp} OLLAMA: {$line}\n";
+                $output                  .= "{$timestamp} " . self::LOGOUT_FLAG_OLLAMA . ": {$line}\n";
                 $this->isFirstOllamaLine = false;
             } else {
                 $output .= "{$line}\n";
@@ -106,7 +107,7 @@ class LogHandler
     public function __destruct()
     {
         if (!empty($this->ollamaBuffer)) {
-            $this->logMessage('OLLAMA', $this->ollamaBuffer);
+            $this->logMessage(self::LOGOUT_FLAG_OLLAMA, $this->ollamaBuffer);
         }
         $this->flushLog();
     }
@@ -121,14 +122,14 @@ class LogHandler
             'timestamp'   => date('Y-m-d H:i:s')
         ], JSON_UNESCAPED_SLASHES);
 
-        $this->logMessage('BATCH_INFO', $logEntry);
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_INFO, $logEntry);
     }
 
 
-    public function logFullDiff(string $diffContent): void
+    public function logFullDiff(string $diffContent, int $contextCount): void
     {
         $this->logMessage(self::LOGOUT_FLAG_BATCH_DIFF, $diffContent);
-        $this->logMessage(self::LOGOUT_FLAG_BATCH_END, "\n");
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_END, "Token Count: $contextCount \n");
     }
 
     public function logBatchStart(string $batchId, int $chunkCount): void
@@ -144,7 +145,7 @@ class LogHandler
 
     public function logFinalReview(string $content)
     {
-        $this->logMessage('[FINAL_REVIEW]', $content);
+        $this->logMessage(self::LOGOUT_FLAG_FINAL_REVIEW, $content);
     }
 
 }
