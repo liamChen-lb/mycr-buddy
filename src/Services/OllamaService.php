@@ -2,11 +2,14 @@
 
 namespace MyCRB\Services;
 
+use MyCRB\Handlers\LogHandler;
 use Yethee\Tiktoken\EncoderProvider;
 
 class OllamaService
 {
     private $config;
+    private LogHandler $logHandler;
+
 
     public function __construct(array $config)
     {
@@ -17,8 +20,8 @@ class OllamaService
     {
         $prompt     = str_replace('{diff}', $diffContent, $this->config['prompt']);
         $tokenCount = $this->countTokens($prompt);
-        // 动态设置上下文长度，避免超出模型最大长度；并且考虑了prompt的占用，增加128作为冗余
-        $dynamicContextLength = min($tokenCount + 128, $this->config['context_length']);
+        // 动态设置上下文长度，避免超出模型最大长度；并且考虑了prompt的占用，增加256作为冗余
+        $dynamicContextLength = min($tokenCount + 256, $this->config['context_length']);
         $modelOptions         = array_merge([
             'temperature'    => 0.1,
             'top_p'          => 0.9,
@@ -77,5 +80,22 @@ class OllamaService
         $encoder = (new EncoderProvider())->getForModel('gpt-3.5-turbo-0301');
 
         return count($encoder->encode($code));
+    }
+
+    public function generateBatchReview(array $chunks, callable $streamHandler): string
+    {
+        $combinedContent = implode("\n\n", array_column($chunks, 'content'));
+        return $this->generateReview($combinedContent, $streamHandler);
+    }
+
+    public function generateSummaryReview(array $partialResults, callable $streamHandler): string
+    {
+        $summaryPrompt = "请综合以下分批评审结果，给出最终评审意见：\n";
+        foreach ($partialResults as $batchId => $result) {
+            $summaryPrompt .= "## 批次 {$batchId} 评审结果\n{$result}\n\n";
+        }
+
+        $this->generateReview($summaryPrompt, $streamHandler);
+        return $summaryPrompt;
     }
 }

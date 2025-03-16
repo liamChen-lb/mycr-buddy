@@ -4,6 +4,16 @@ namespace MyCRB\Handlers;
 
 class LogHandler
 {
+
+    // 添加几个输出的常量，如[USER]等
+    const LOGOUT_FLAG_USER         = '[USER]';
+    const LOGOUT_FLAG_OLLAMA       = '[OLLAMA]';
+    const LOGOUT_FLAG_FINAL_REVIEW = '[FINAL_REVIEW]';
+    const LOGOUT_FLAG_BATCH_START  = '[BATCH START]';
+    const LOGOUT_FLAG_BATCH_DIFF   = '[BATCH DIFF START]';
+    const LOGOUT_FLAG_BATCH_END    = '[BATCH END]';
+    const LOGOUT_FLAG_BATCH_INFO   = '[BATCH_INFO]';
+
     private $logFile;
     private $logBuffer = '';
     private const LOG_FLUSH_LIMIT = 4096;
@@ -100,4 +110,41 @@ class LogHandler
         }
         $this->flushLog();
     }
+
+    public function logBatchMeta(array $meta)
+    {
+        $logEntry = json_encode([
+            'batch_id'    => $meta['id'] ?? '',
+            'parent_ids'  => $meta['parent_ids'] ?? [],
+            'token_count' => $meta['token_count'] ?? 0,
+            'files'       => array_keys($meta['file_map'] ?? []),
+            'timestamp'   => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_SLASHES);
+
+        $this->logMessage('BATCH_INFO', $logEntry);
+    }
+
+
+    public function logFullDiff(string $diffContent): void
+    {
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_DIFF, $diffContent);
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_END, "\n");
+    }
+
+    public function logBatchStart(string $batchId, int $chunkCount): void
+    {
+        $this->logMessage("[BATCH {$batchId} START]", " 包含 {$chunkCount} 个代码段");
+    }
+
+    public function logBatchDiff(string $batchId, string $combinedDiff): void
+    {
+        $this->logMessage("[BATCH {$batchId} DIFF START]", "\n $combinedDiff");
+        $this->logMessage("[BATCH {$batchId} DIFF END]", '');
+    }
+
+    public function logFinalReview(string $content)
+    {
+        $this->logMessage('[FINAL_REVIEW]', $content);
+    }
+
 }
