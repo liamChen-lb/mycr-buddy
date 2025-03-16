@@ -15,11 +15,11 @@ class LogHandler
     const LOGOUT_FLAG_SUMMARY_PROMPT = '[SUMMARY_PROMPT]';
     const LOGOUT_FLAG_PROMPT         = '[PROMPT]';
 
-    private $logFile;
-    private $logBuffer = '';
+    private string $logFile;
+    private string $logBuffer = '';
     private const LOG_FLUSH_LIMIT = 4096;
-    private $ollamaBuffer = '';
-    private $isFirstOllamaLine = true;
+    private string $ollamaBuffer = '';
+    private bool $isFirstOllamaLine = true;
 
     public function __construct(string $logFile)
     {
@@ -30,7 +30,7 @@ class LogHandler
         $this->ensureDirExists(dirname($this->logFile));
     }
 
-    private function ensureDirExists($dirPath)
+    private function ensureDirExists($dirPath): void
     {
         if (!is_dir($dirPath) && !mkdir($dirPath, 0750, true)) {
             throw new \RuntimeException("目录创建失败: {$dirPath}");
@@ -40,7 +40,7 @@ class LogHandler
         }
     }
 
-    public function logMessage(string $type, string $message)
+    public function logMessage(string $type, string $message): void
     {
         $formatted       = $this->formatMessage($type, $message);
         $this->logBuffer .= $formatted;
@@ -74,7 +74,7 @@ class LogHandler
         return $output;
     }
 
-    public function flushLog()
+    public function flushLog(): void
     {
         try {
             if (!empty($this->logBuffer)) {
@@ -112,7 +112,7 @@ class LogHandler
         $this->flushLog();
     }
 
-    public function logBatchMeta(array $meta)
+    public function logBatchMeta(array $meta): void
     {
         $logEntry = json_encode([
             'batch_id'    => $meta['id'] ?? '',
@@ -143,7 +143,7 @@ class LogHandler
         $this->logMessage("[BATCH {$batchId} DIFF END]", '');
     }
 
-    public function logFinalReview(string $content)
+    public function logFinalReview(string $content): void
     {
         $this->logMessage(self::LOGOUT_FLAG_FINAL_REVIEW, $content);
     }

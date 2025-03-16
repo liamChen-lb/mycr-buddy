@@ -7,10 +7,13 @@ use GuzzleHttp\Exception\GuzzleException;
 
 class GitHubService
 {
-    private $config;
+    private array $config;
 
     public function __construct(array $config)
     {
+        if (!isset($config['github_token'])) {
+            throw new \InvalidArgumentException('GitHub token未配置');
+        }
         $this->config = $config;
     }
 
@@ -53,27 +56,19 @@ class GitHubService
         }
     }
 
-    private function getStatusCodeFromHeader(array $headers): int
-    {
-        foreach ($headers as $header) {
-            if (strpos($header, 'HTTP/') === 0) {
-                return (int)substr($header, 9, 3);
-            }
-        }
-        return 0;
-    }
-
     public function postComment(string $owner, string $repo, int $prNumber, string $content): void
     {
         $apiUrl = "https://api.github.com/repos/{$owner}/{$repo}/issues/{$prNumber}/comments";
 
-        $client = new Client();
+        $client = new Client([
+            'timeout' => 30
+        ]);
         try {
             $response = $client->post($apiUrl, [
                 'headers'     => [
                     'Authorization' => 'Bearer ' . $this->config['github_token'],
                     'Accept'        => 'application/vnd.github.v3+json',
-                    'User-Agent'    => 'MyCR-Buddy/1.0'
+                    'User-Agent'    => 'MyCRB-Buddy/1.0'
                 ],
                 'json'        => ['body' => $content],
                 'http_errors' => false

@@ -4,14 +4,14 @@ namespace MyCRB\Services;
 
 class BatchManager
 {
-    private $contextLength;
+    private int $contextLength;
 
     public function __construct(int $contextLength)
     {
         $this->contextLength = $contextLength;
     }
 
-    public function createBatches(array $chunks): array
+    public function createBatches(array $chunks, int $promptTokenReserve = 256): array
     {
         $batches      = [];
         $currentBatch = [
@@ -22,8 +22,7 @@ class BatchManager
         ];
 
         foreach ($chunks as $chunk) {
-            // TODO: 这里的256应该作为一个参数或者配置项
-            $required = $chunk['token_count'] + 256; // 保留256token给系统prompt
+            $required = $chunk['token_count'] + $promptTokenReserve; // 使用参数代替硬编码
 
             // 大小超出，则需要分批
             if (($currentBatch['token_count'] + $required) > $this->contextLength) {

@@ -27,9 +27,4 @@ class DiffSplitter {
 
         return array_filter($files);
     }
-
-    public function splitBySyntax(string $content, int $maxTokens): array {
-        // AST解析实现待补充
-        return [$content];
-    }
 }
