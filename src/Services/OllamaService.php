@@ -42,7 +42,7 @@ class OllamaService
             ]),
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_WRITEFUNCTION  => $streamHandler,
-            CURLOPT_TIMEOUT        => 300
+            CURLOPT_TIMEOUT        => 60 * 30// 30分钟超时
         ]);
 
         $result = curl_exec($ch);

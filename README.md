@@ -12,10 +12,11 @@
 - ✅ 自动生成带时间戳的日志
 - ✅ 上下文长度可配置
 - ✅ 支持多种开源大模型
-- ✅ **新增** 历史评审提交功能（支持`-p pre`参数）
-- ✅ **新增** 立即提交模式（`-p now`参数）
-- ✅ **动态上下文计算**    根据代码差异自动调整模型上下文长度（`num_ctx = token_count + 1024`）
-- ✅ **多模型分词适配**    支持Qwen2.5模型专用分词器（正则优化）
+- ✅ 历史评审提交功能（支持`-p pre`参数）
+- ✅ 立即提交模式（`-p now`参数）
+- ✅ **动态上下文计算**    根据代码差异自动调整模型上下文长度（`num_ctx = token_count + 256`）
+- ✅ **多模型分词适配**    引入yethee/tiktoken，默认使用gpt-3.5-turbo-0301作为分词规则
+- ✅ **动态分批分段评审**    根据代码差异按file级别分段，按照context_length限制进行分批
 
 ## 环境要求
 
@@ -37,6 +38,9 @@ https://ollama.com/download/OllamaSetup.exe
 
 # 下载模型（示例使用qwen2.5-coder:14b）
 ollama pull qwen2.5-coder:14b
+
+# 安装composer依赖
+composer install
 ```
 
 ### 2. 项目配置
