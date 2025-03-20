@@ -12,14 +12,15 @@
 - ✅ 自动生成带时间戳的日志
 - ✅ 上下文长度可配置
 - ✅ 支持多种开源大模型
-- ✅ **新增** 历史评审提交功能（支持`-p pre`参数）
-- ✅ **新增** 立即提交模式（`-p now`参数）
-- ✅ **动态上下文计算**    根据代码差异自动调整模型上下文长度（`num_ctx = token_count + 1024`）
-- ✅ **多模型分词适配**    支持Qwen2.5模型专用分词器（正则优化）
+- ✅ 历史评审提交功能（支持`-p pre`参数）
+- ✅ 立即提交模式（`-p now`参数）
+- ✅ **动态上下文计算**    根据代码差异自动调整模型上下文长度（`num_ctx = token_count + 256`）
+- ✅ **多模型分词适配**    引入yethee/tiktoken，默认使用gpt-3.5-turbo-0301作为分词规则
+- ✅ **动态分批分段评审**    根据代码差异按file级别分段，按照context_length限制进行分批
 
 ## 环境要求
 
-- PHP 7.3+
+- PHP 8.1+
 - Ollama服务（推荐v0.5.13或最新版）
 - cURL扩展
 - JSON扩展
@@ -37,6 +38,9 @@ https://ollama.com/download/OllamaSetup.exe
 
 # 下载模型（示例使用qwen2.5-coder:14b）
 ollama pull qwen2.5-coder:14b
+
+# 安装composer依赖
+composer install
 ```
 
 ### 2. 项目配置
@@ -110,16 +114,18 @@ logs/
 
 ## 配置说明
 
-| 配置项            | 说明                                          |
+| 配置项 | 说明 |
 |----------------|---------------------------------------------|
-| model_params   | 允许进一步设置模型参数，如温度、TopP等                       |
-| github_token   | GitHub个人访问令牌（需repo权限）                       |
-| ollama_host    | Ollama服务地址（默认`http://localhost:11434`）      |
-| model_name     | 使用的模型名称（需提前通过`ollama pull`下载）               |
-| context_length | 模型上下文长度（建议设为模型最大支持值）                        |
-| log_dir        | 日志存储目录（需写权限）                                |
-| prompt         | 审查提示词模板（`{diff}`占位符会自动替换为PR差异）              |
-| **命令行参数**      | `-p now`：立即生成并提交评审<br>`-p pre`：提交最近一次历史评审记录 |
+| model_params   | 允许进一步设置模型参数，如温度、TopP等 |
+| github_token   | GitHub个人访问令牌（需repo权限） |
+| ollama_host    | Ollama服务地址（默认`http://localhost:11434`） |
+| model_name     | 使用的模型名称（需提前通过`ollama pull`下载） |
+| context_length | 模型上下文长度（建议设为模型最大支持值） |
+| log_dir        | 日志存储目录（需写权限） |
+| prompt         | 审查提示词模板（`{diff}`占位符会自动替换为PR差异） |
+| tokenizer_model | 分词器模型名称（默认`gpt-3.5-turbo-0301`） |
+| tokenizer_fallback | 备选分词器模型（当主分词器不可用时使用） |
+| **命令行参数**  | `-p now`：立即生成并提交评审<br>`-p pre`：提交最近一次历史评审记录 |
 
 ## 审查模式对比
 
@@ -157,12 +163,18 @@ logs/
     - 模型规模（14B/32B）
     - 提示词设计
     - 上下文长度设置
+    - 分词器选择和配置
 
 4. 大模型响应速度参考：
     - 14B模型：约5-15秒/请求
     - 32B模型：约20-40秒/请求
 
-5. 参数使用规范：
+5. 分词器配置说明：
+    - `tokenizer_model`：主要分词器模型，默认使用`gpt-3.5-turbo-0301`
+    - `tokenizer_fallback`：备选分词器，当主分词器不可用时自动切换
+    - 系统会自动处理分词器兼容性问题
+
+6. 参数使用规范：
     - `-p now` 会强制重新生成评审内容并立即提交
     - `-p pre` 会尝试提交最近一次成功生成的评审记录
     - 未指定参数时仅生成评审内容不提交

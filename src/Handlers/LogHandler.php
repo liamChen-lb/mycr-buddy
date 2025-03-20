@@ -4,11 +4,22 @@ namespace MyCRB\Handlers;
 
 class LogHandler
 {
-    private $logFile;
-    private $logBuffer = '';
+
+    // 添加几个输出的常量，如[USER]等
+    const LOGOUT_FLAG_USER           = '[USER]';
+    const LOGOUT_FLAG_OLLAMA         = '[OLLAMA]';
+    const LOGOUT_FLAG_FINAL_REVIEW   = '[FINAL_REVIEW]';
+    const LOGOUT_FLAG_BATCH_DIFF     = '[FULL_DIFF_START]';
+    const LOGOUT_FLAG_BATCH_END      = '[FULL_DIFF_END]';
+    const LOGOUT_FLAG_BATCH_INFO     = '[BATCH_INFO]';
+    const LOGOUT_FLAG_SUMMARY_PROMPT = '[SUMMARY_PROMPT]';
+    const LOGOUT_FLAG_PROMPT         = '[PROMPT]';
+
+    private string $logFile;
+    private string $logBuffer = '';
     private const LOG_FLUSH_LIMIT = 4096;
-    private $ollamaBuffer = '';
-    private $isFirstOllamaLine = true;
+    private string $ollamaBuffer = '';
+    private bool $isFirstOllamaLine = true;
 
     public function __construct(string $logFile)
     {
@@ -19,7 +30,7 @@ class LogHandler
         $this->ensureDirExists(dirname($this->logFile));
     }
 
-    private function ensureDirExists($dirPath)
+    private function ensureDirExists($dirPath): void
     {
         if (!is_dir($dirPath) && !mkdir($dirPath, 0750, true)) {
             throw new \RuntimeException("目录创建失败: {$dirPath}");
@@ -29,7 +40,7 @@ class LogHandler
         }
     }
 
-    public function logMessage(string $type, string $message)
+    public function logMessage(string $type, string $message): void
     {
         $formatted       = $this->formatMessage($type, $message);
         $this->logBuffer .= $formatted;
@@ -43,7 +54,7 @@ class LogHandler
     {
         $timestamp = date('[Y-m-d H:i:s]');
 
-        if ($type !== 'OLLAMA') {
+        if ($type !== self::LOGOUT_FLAG_OLLAMA) {
             return "{$timestamp} {$type}: {$message}\n";
         }
 
@@ -54,7 +65,7 @@ class LogHandler
         $output = '';
         foreach ($lines as $line) {
             if ($this->isFirstOllamaLine) {
-                $output                  .= "{$timestamp} OLLAMA: {$line}\n";
+                $output                  .= "{$timestamp} " . self::LOGOUT_FLAG_OLLAMA . ": {$line}\n";
                 $this->isFirstOllamaLine = false;
             } else {
                 $output .= "{$line}\n";
@@ -63,7 +74,7 @@ class LogHandler
         return $output;
     }
 
-    public function flushLog()
+    public function flushLog(): void
     {
         try {
             if (!empty($this->logBuffer)) {
@@ -96,8 +107,55 @@ class LogHandler
     public function __destruct()
     {
         if (!empty($this->ollamaBuffer)) {
-            $this->logMessage('OLLAMA', $this->ollamaBuffer);
+            $this->logMessage(self::LOGOUT_FLAG_OLLAMA, $this->ollamaBuffer);
         }
         $this->flushLog();
     }
+
+    public function logBatchMeta(array $meta): void
+    {
+        $logEntry = json_encode([
+            'batch_id'    => $meta['id'] ?? '',
+            'parent_ids'  => $meta['parent_ids'] ?? [],
+            'token_count' => $meta['token_count'] ?? 0,
+            'files'       => array_keys($meta['file_map'] ?? []),
+            'timestamp'   => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_SLASHES);
+
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_INFO, $logEntry);
+    }
+
+
+    public function logFullDiff(string $diffContent, int $contextCount): void
+    {
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_DIFF, $diffContent);
+        $this->logMessage(self::LOGOUT_FLAG_BATCH_END, "Token Count: $contextCount \n");
+    }
+
+    public function logBatchStart(string $batchId, int $chunkCount): void
+    {
+        $this->logMessage("[BATCH {$batchId} START]", " 包含 {$chunkCount} 个代码段");
+    }
+
+    public function logBatchDiff(string $batchId, string $combinedDiff): void
+    {
+        $this->logMessage("[BATCH {$batchId} DIFF START]", "\n $combinedDiff");
+        $this->logMessage("[BATCH {$batchId} DIFF END]", '');
+    }
+
+    /**
+     * 记录最终评审结果
+     * @param string $content 评审内容
+     * @param string|null $modelName 模型名称，如果为null则不添加模型标记
+     */
+    public function logFinalReview(string $content, ?string $modelName = null): void
+    {
+        // 如果提供了模型名称，则在评审内容前添加模型标记
+        if ($modelName) {
+            $content = "## " . htmlspecialchars($modelName) . "\n\n" . $content;
+        }
+        
+        $this->logMessage(self::LOGOUT_FLAG_FINAL_REVIEW, $content);
+    }
+
 }

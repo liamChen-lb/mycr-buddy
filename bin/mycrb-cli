@@ -1,10 +1,10 @@
 #!/usr/bin/env php
 <?php
 
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__ . '/../vendor/autoload.php';
 
-if (PHP_VERSION_ID < 70300) {
-    die("需要PHP 7.3或更高版本\n");
+if (PHP_VERSION_ID < 80100) {
+    die("需要PHP 8.1或更高版本\n");
 }
 
 $args = $_SERVER['argv'];
@@ -26,6 +26,8 @@ if (empty($args)) {
 $prUrl = array_shift($args);
 
 try {
+    // 先设置时区
+    date_default_timezone_set('Asia/Shanghai');
     $reviewer = new \MyCRB\MyCRB();
     $reviewer->run($prUrl, $postType);
 } catch (Throwable $e) {

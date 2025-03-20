@@ -4,25 +4,28 @@ namespace MyCRB;
 
 use Exception;
 use MyCRB\Handlers\LogHandler;
+use MyCRB\Services\BatchManager;
+use MyCRB\Services\DiffSplitter;
 use MyCRB\Services\GitHubService;
 use MyCRB\Services\OllamaService;
 use RuntimeException;
 
 class MyCRB
 {
-    private $config;
-    private $prUrl;
-    private $finalReviewContent = '';
-    private $githubService;
-    private $ollamaService;
-    private $logHandler;
+    private array $config;
+    private string $prUrl;
+    private string $finalReviewContent = '';
+    private string $batchReviewContent = '';
+    private GitHubService $githubService;
+    private OllamaService $ollamaService;
+    private LogHandler $logHandler;
 
-    private $buffer = '';
+    private string $buffer = '';
 
-    private $ollamaBuffer = '';
-    private $logBuffer = '';
-    private $isFirstOllamaLine = true;
-    private $logFile;
+    private string $ollamaBuffer = '';
+    private string $logBuffer = '';
+    private bool $isFirstOllamaLine = true;
+    private string $logFile;
 
     // 构造函数初始化配置和输出缓冲
     public function __construct()
@@ -35,7 +38,7 @@ class MyCRB
     }
 
     // 验证配置完整性
-    private function validateConfig()
+    private function validateConfig(): void
     {
         $requiredKeys = ['github_token', 'ollama_host', 'model_name'];
         foreach ($requiredKeys as $key) {
@@ -51,10 +54,18 @@ class MyCRB
         // 设置默认配置值
         $this->config['context_length'] = $this->config['context_length'] ?? 4096;
         $this->config['log_dir']        = $this->config['log_dir'] ?? __DIR__ . '/logs';
+
+        // 添加分词器配置，确保有预设的安全回退选项
+        $this->config['tokenizer_model']    = $this->config['tokenizer_model'] ?? 'gpt-3.5-turbo-0301';
+        $this->config['tokenizer_fallback'] = $this->config['tokenizer_fallback'] ?? 'gpt-3.5-turbo-0301';
     }
 
-    // 初始化日志文件路径
-    private function initLogFile()
+
+    /**
+     * 初始化日志文件路径
+     * @throws Exception
+     */
+    private function initLogFile(): void
     {
         $safeUrl   = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
         $timestamp = date('Y.m.d.H.i.s');
@@ -76,8 +87,13 @@ class MyCRB
         }
     }
 
-    // 确保日志目录存在且可写
-    private function ensureDirExists($dirPath)
+    /**
+     * 确保日志目录存在且可写
+     * @param string $dirPath
+     * @return void
+     * @throws Exception
+     */
+    private function ensureDirExists(string $dirPath): void
     {
         if (!is_dir($dirPath)) {
             if (!mkdir($dirPath, 0750, true)) {
@@ -89,10 +105,14 @@ class MyCRB
         }
     }
 
-    // 主执行流程
-    public function run($prUrl, $postType = null)
+
+    /**
+     * 主执行流程
+     * @throws Exception
+     */
+    public function run($prUrl, $postType = null): void
     {
-        set_time_limit(600); // 设置最长执行时间
+        set_time_limit(600);
         $this->prUrl = $prUrl;
         $this->initLogFile();
         $this->logHandler = new LogHandler($this->logFile);
@@ -100,8 +120,11 @@ class MyCRB
         $this->logInput("Starting review for PR: {$prUrl}");
 
         try {
+            $startTime = microtime(true);
+
             $diffContent = $this->getGitHubDiff();
-            $this->logDiff($diffContent);
+            // 记录完整的diff code
+            $this->logHandler->logFullDiff($diffContent, $this->ollamaService->countTokens($diffContent));
 
             if ($postType === 'now') {
                 $this->executeAndSubmitReview($diffContent);
@@ -110,15 +133,40 @@ class MyCRB
             } else {
                 $this->generateReview($diffContent);
             }
+
+            $duration = round(microtime(true) - $startTime, 2);
+            $this->logInput("Review completed in {$duration}s");
+            // 需要刷新日志缓冲并关闭日志文件
+            $this->logHandler->flushLog();
         } catch (Exception $e) {
             $this->handleError($e);
         } finally {
-            ob_end_flush(); // 确保输出缓冲释放
+            ob_end_flush();
         }
     }
 
+    private function createChunksWithTokenCount(array $fileDiffs): array
+    {
+        return array_map(function ($diff) {
+            return [
+                'file'        => $this->extractFileName($diff),
+                'content'     => $diff,
+                'token_count' => $this->ollamaService->countTokens($diff)
+            ];
+        }, $fileDiffs);
+    }
+
+    private function extractFileName($diff): string
+    {
+        $lines = explode("\n", $diff);
+        if (count($lines) > 1) {
+            return trim($lines[1]);
+        }
+        return '';
+    }
+
     // 处理历史评审提交
-    private function handlePreviousReview($diffContent)
+    private function handlePreviousReview($diffContent): void
     {
         if (!$this->submitPreviousReview()) {
             $this->generateReview($diffContent);
@@ -127,58 +175,55 @@ class MyCRB
     }
 
     // 执行评审生成并提交
-    private function executeAndSubmitReview($diffContent)
+    private function executeAndSubmitReview($diffContent): void
     {
-        $startTime = microtime(true);
-        $this->callOllama($diffContent);
-        $duration = round(microtime(true) - $startTime, 2);
-        $this->logInput("Review completed in {$duration}s");
+        $this->generateReview($diffContent);
         $this->submitCurrentReview();
     }
 
     // 仅生成评审不提交
-    private function generateReview($diffContent)
+    private function generateReview($diffContent): void
     {
-        $startTime = microtime(true);
-        $this->callOllama($diffContent);
-        $duration = round(microtime(true) - $startTime, 2);
-        $this->logInput("Review completed in {$duration}s");
+        // 引入DiffSplitter类
+        $splitter  = new DiffSplitter();
+        $fileDiffs = $splitter->splitByFile($diffContent);
+
+        // 创建代码块并计算token
+        $chunks = $this->createChunksWithTokenCount($fileDiffs);
+
+        // 生成批次
+        $batchManager = new BatchManager($this->config['context_length']);
+        $batches      = $batchManager->createBatches(
+            $chunks,
+            $this->ollamaService->countTokens($this->config['prompt'])
+        );
+
+        // 处理分批评审
+        $partialResults = $this->processBatchedReview($batches);
+
+        // 聚合最终结果
+        // 当只有一批的时候，就不需要聚合，直接返回即可
+        if (count($batches) > 1) {
+            $summaryPrompt = $this->ollamaService->generateSummaryReview(
+                $partialResults,
+                $this->getStreamHandler()
+            );
+            $this->logHandler->logMessage(LogHandler::LOGOUT_FLAG_SUMMARY_PROMPT, $summaryPrompt);
+        }
+        // 会将最后的聚合评审结果也放在 batchReviewContent，因此直接赋值
+        $this->finalReviewContent = $this->batchReviewContent;
+        $this->logHandler->logFinalReview($this->finalReviewContent, $this->config['model_name']);
     }
 
     // 获取GitHub PR的diff内容
-    private function getGitHubDiff()
+    private function getGitHubDiff(): string
     {
         return $this->githubService->getDiff($this->prUrl);
     }
 
-    // 从响应头解析HTTP状态码
-    private function getStatusCodeFromHeader($headers)
-    {
-        foreach ($headers as $header) {
-            if (strpos($header, 'HTTP/') === 0) {
-                return (int)substr($header, 9, 3);
-            }
-        }
-        return 0;
-    }
-
-    // 调用Ollama生成评审内容
-    // 修改callOllama方法来动态设置上下文
-    private function callOllama($diffContent)
-    {
-        $tokenCount = $this->ollamaService->countTokens($diffContent);
-        if ($tokenCount > $this->config['context_length']) {
-            throw new RuntimeException("代码的token数量超过了配置中的最大上下文长度");
-        }
-        $this->logHandler->logMessage('PROMPT', $this->config['prompt']);
-        $this->ollamaService->generateReview(
-            $diffContent,
-            $this->getStreamHandler()
-        );
-    }
 
     // 获取流式响应处理回调
-    private function getStreamHandler()
+    private function getStreamHandler(): \Closure
     {
         return function ($ch, $data) {
             $response = json_decode($data, true);
@@ -190,7 +235,7 @@ class MyCRB
     }
 
     // 处理Ollama流式响应
-    private function handleStreamResponse(array $response)
+    private function handleStreamResponse(array $response): void
     {
         if (!isset($response['response'])) {
             return;
@@ -199,9 +244,9 @@ class MyCRB
         $chunk = $response['response'];
         echo $chunk; // 实时输出到终端
         $this->buffer             .= $chunk;
-        $this->finalReviewContent = $this->buffer; // 实时更新最终内容
+        $this->batchReviewContent = $this->buffer; // 实时更新最终内容
 
-        $this->logMessage('OLLAMA', $chunk);
+        $this->logMessage(LogHandler::LOGOUT_FLAG_OLLAMA, $chunk);
 
         // 强制立即刷新输出缓冲区
         if (ob_get_level() > 0) {
@@ -217,22 +262,23 @@ class MyCRB
     }
 
     // 日志记录方法
-    private function logMessage($type, $message)
+    private function logMessage($type, $message): void
     {
         $this->logHandler->logMessage($type, $message);
     }
 
-    // 格式化日志消息
 
     // 提交当前评审到GitHub
-    public function submitCurrentReview()
+    private function submitCurrentReview(): void
     {
         if (empty(trim($this->finalReviewContent))) {
             throw new RuntimeException("没有可用的评审内容");
         }
 
         try {
-            $this->postGitHubComment($this->finalReviewContent);
+            // 这里也需要拼接上模型名称
+            $content = "## " . htmlspecialchars($this->config['model_name']) . "\n\n" . $this->finalReviewContent;
+            $this->postGitHubComment($content);
             $this->logInput("已成功提交评审到PR评论");
         } catch (Exception $e) {
             $this->logInput("提交评审失败: " . $e->getMessage());
@@ -241,7 +287,7 @@ class MyCRB
     }
 
     // 发送GitHub评论
-    private function postGitHubComment($commentBody)
+    private function postGitHubComment($commentBody): void
     {
         $parsed    = parse_url($this->prUrl);
         $pathParts = explode('/', trim($parsed['path'] ?? '', '/'));
@@ -257,6 +303,7 @@ class MyCRB
         );
 
         try {
+            // 直接使用评审内容，因为模型名称已经在日志记录时添加
             $this->githubService->postComment(
                 $pathParts[0], // owner
                 $pathParts[1], // repo
@@ -270,7 +317,7 @@ class MyCRB
     }
 
     // 提交历史评审
-    public function submitPreviousReview()
+    public function submitPreviousReview(): bool
     {
         $logDir     = $this->config['log_dir'];
         $prFilename = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $this->prUrl);
@@ -284,19 +331,20 @@ class MyCRB
             return false;
         }
 
+        // 优化后的排序逻辑
         usort($files, function ($a, $b) use ($logDir) {
-            return filemtime("{$logDir}/$b") - filemtime("{$logDir}/$a");
+            return filemtime("{$logDir}/$b") <=> filemtime("{$logDir}/$a"); // 太空船操作符简化比较
         });
 
-        $currentLog   = basename($this->logFile);
-        $previousFile = null;
+        // 新增强制类型转换和过滤逻辑
+        $files = array_values(array_diff($files, [basename($this->logFile)])); // 过滤当前日志并重置索引
 
-        foreach ($files as $file) {
-            if ($file != $currentLog) {
-                $previousFile = $file;
-                break;
-            }
+        if (empty($files)) {
+            $this->logInput("无可用历史评审");
+            return false;
         }
+
+        $previousFile = $files[0]; // 直接取排序后首个文件
 
         if (!$previousFile) {
             $this->logInput("未找到可用的历史评审");
@@ -304,13 +352,19 @@ class MyCRB
         }
 
         $logContent = file_get_contents("{$logDir}/$previousFile");
-        preg_match_all('/\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] OLLAMA: (.*?)(?=\n\[|\Z)/s', $logContent, $matches);
+
+        // 修复正则表达式，匹配完整的日志行格式
+        $pattern = '/' . preg_quote(LogHandler::LOGOUT_FLAG_FINAL_REVIEW) . ': (.*?)(?=\n\[|\Z)/s';
+
+        preg_match_all($pattern, $logContent, $matches);
         $reviewContent = trim(implode("\n", $matches[1]));
 
         if (empty($reviewContent)) {
             $this->logInput("历史评审内容为空");
             return false;
         }
+        // 将历史评审也写入到日志中
+        $this->logHandler->logFinalReview($reviewContent);
 
         $this->postGitHubComment($reviewContent);
         $this->logInput("历史评审已成功提交到PR评论");
@@ -334,30 +388,9 @@ class MyCRB
         $this->logHandler->flushLog();
     }
 
-    // 刷新日志缓冲区
-    private function flushLogBuffer()
-    {
-        if (empty($this->logBuffer)) {
-            return;
-        }
-
-        $retry = 0;
-        while ($retry < 3) {
-            $bytes = @file_put_contents($this->logFile, $this->logBuffer, FILE_APPEND);
-            if ($bytes !== false) {
-                chmod($this->logFile, 0640);
-                $this->logBuffer = '';
-                return;
-            }
-            usleep(100000);
-            $retry++;
-        }
-
-        error_log("日志写入失败: " . $this->logFile);
-    }
 
     // 错误处理
-    private function handleError(Exception $e)
+    private function handleError(Exception $e): void
     {
         $message = "Error [{$e->getCode()}]: {$e->getMessage()}";
         echo $message . PHP_EOL;
@@ -365,21 +398,30 @@ class MyCRB
     }
 
     // 记录用户输入日志
-    private function logInput($message)
+    private function logInput($message): void
     {
-        $this->logMessage('USER', $message);
+        $this->logMessage(LogHandler::LOGOUT_FLAG_USER, $message);
     }
 
-    // 记录diff内容日志
-    private function logDiff($content)
+
+    private function processBatchedReview(array $batches): array
     {
-        $tokenCount = $this->ollamaService->countTokens($content);
-        $this->logMessage('DIFF', "PR Diff Content:\n" . $content . "\nToken Count: " . $tokenCount);
+        $partialResults = [];
+        foreach ($batches as $index => $batch) {
+            // 记录当前批次diff
+            $this->logHandler->logBatchStart($batch['id'], count($batch['chunks']));
+            $this->logHandler->logBatchDiff($batch['id'], implode("\n", array_column($batch['chunks'], 'content')));
+            $this->logHandler->logBatchMeta($batch);
+
+            $this->logHandler->logMessage(LogHandler::LOGOUT_FLAG_PROMPT, $this->config['prompt']);
+            $this->ollamaService->generateBatchReview(
+                $batch['chunks'],
+                $this->getStreamHandler()
+            );
+            $partialResults[$batch['id']] = $this->batchReviewContent;
+        }
+        return $partialResults;
     }
 
-    // 记录系统输出日志
-    private function logOutput($message)
-    {
-        $this->logMessage('ASSISTANT', $message);
-    }
+
 }

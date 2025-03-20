@@ -1,6 +1,9 @@
 {
   "require": {
-    "guzzlehttp/guzzle": "^7.0"
+    "guzzlehttp/guzzle": "^7.0",
+    "yethee/tiktoken": "^0.7.0",
+    "php": ">=8.1",
+    "ext-curl": "*"
   },
   "autoload": {
     "psr-4": {
