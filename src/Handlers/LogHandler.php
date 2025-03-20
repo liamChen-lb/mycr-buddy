@@ -143,8 +143,18 @@ class LogHandler
         $this->logMessage("[BATCH {$batchId} DIFF END]", '');
     }
 
-    public function logFinalReview(string $content): void
+    /**
+     * 记录最终评审结果
+     * @param string $content 评审内容
+     * @param string|null $modelName 模型名称，如果为null则不添加模型标记
+     */
+    public function logFinalReview(string $content, ?string $modelName = null): void
     {
+        // 如果提供了模型名称，则在评审内容前添加模型标记
+        if ($modelName) {
+            $content = "## " . htmlspecialchars($modelName) . "\n\n" . $content;
+        }
+        
         $this->logMessage(self::LOGOUT_FLAG_FINAL_REVIEW, $content);
     }
 

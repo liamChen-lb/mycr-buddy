@@ -54,6 +54,10 @@ class MyCRB
         // 设置默认配置值
         $this->config['context_length'] = $this->config['context_length'] ?? 4096;
         $this->config['log_dir']        = $this->config['log_dir'] ?? __DIR__ . '/logs';
+
+        // 添加分词器配置，确保有预设的安全回退选项
+        $this->config['tokenizer_model']    = $this->config['tokenizer_model'] ?? 'gpt-3.5-turbo-0301';
+        $this->config['tokenizer_fallback'] = $this->config['tokenizer_fallback'] ?? 'gpt-3.5-turbo-0301';
     }
 
 
@@ -208,7 +212,7 @@ class MyCRB
         }
         // 会将最后的聚合评审结果也放在 batchReviewContent，因此直接赋值
         $this->finalReviewContent = $this->batchReviewContent;
-        $this->logHandler->logFinalReview($this->finalReviewContent);
+        $this->logHandler->logFinalReview($this->finalReviewContent, $this->config['model_name']);
     }
 
     // 获取GitHub PR的diff内容
@@ -272,7 +276,9 @@ class MyCRB
         }
 
         try {
-            $this->postGitHubComment($this->finalReviewContent);
+            // 这里也需要拼接上模型名称
+            $content = "## " . htmlspecialchars($this->config['model_name']) . "\n\n" . $this->finalReviewContent;
+            $this->postGitHubComment($content);
             $this->logInput("已成功提交评审到PR评论");
         } catch (Exception $e) {
             $this->logInput("提交评审失败: " . $e->getMessage());
@@ -297,8 +303,7 @@ class MyCRB
         );
 
         try {
-            // 在评论前面，标记上所使用的模型
-            $commentBody = "## " . $this->config['model_name'] . "\n\n" . $commentBody;
+            // 直接使用评审内容，因为模型名称已经在日志记录时添加
             $this->githubService->postComment(
                 $pathParts[0], // owner
                 $pathParts[1], // repo
@@ -347,14 +352,19 @@ class MyCRB
         }
 
         $logContent = file_get_contents("{$logDir}/$previousFile");
-        // 当前的final评审格式为： [2025-03-16 09:31:02] [FINAL_REVIEW]: ## 综合评估与建议
-        preg_match_all('/\[FINAL_REVIEW\]: (.*?)(?=\n\[|\Z)/s', $logContent, $matches);
+
+        // 修复正则表达式，匹配完整的日志行格式
+        $pattern = '/' . preg_quote(LogHandler::LOGOUT_FLAG_FINAL_REVIEW) . ': (.*?)(?=\n\[|\Z)/s';
+
+        preg_match_all($pattern, $logContent, $matches);
         $reviewContent = trim(implode("\n", $matches[1]));
 
         if (empty($reviewContent)) {
             $this->logInput("历史评审内容为空");
             return false;
         }
+        // 将历史评审也写入到日志中
+        $this->logHandler->logFinalReview($reviewContent);
 
         $this->postGitHubComment($reviewContent);
         $this->logInput("历史评审已成功提交到PR评论");

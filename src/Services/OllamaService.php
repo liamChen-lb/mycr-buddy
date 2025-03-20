@@ -42,7 +42,7 @@ class OllamaService
             ]),
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_WRITEFUNCTION  => $streamHandler,
-            CURLOPT_TIMEOUT        => 60 * 30// 30分钟超时
+            CURLOPT_TIMEOUT        => 60 * 30 // 30分钟超时
         ]);
 
         $result = curl_exec($ch);
@@ -50,6 +50,9 @@ class OllamaService
             $error = curl_error($ch);
             curl_close($ch);
             throw new \RuntimeException("cURL request failed: " . $error);
+        }
+        if (empty($result)) {
+            throw new \RuntimeException("Ollama returned empty response");
         }
         $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($statusCode >= 400) {
@@ -68,8 +71,27 @@ class OllamaService
      */
     public function countTokens(string $code): int
     {
-        // 先统一使用 EncoderProvider 来分词，并且使用 'gpt-3.5-turbo-0301'模型
-        $encoder = (new EncoderProvider())->getForModel('gpt-3.5-turbo-0301');
+        $provider   = new EncoderProvider();
+        $modelToUse = $this->config['tokenizer_model'];
+
+        try {
+            // 尝试使用配置的分词器模型
+            $encoder = $provider->getForModel($modelToUse);
+        } catch (\Exception $e) {
+            // 如果配置的模型不支持，降级到指定的回退模型
+            $modelToUse = $this->config['tokenizer_fallback'];
+            try {
+                $encoder = $provider->getForModel($modelToUse);
+                // 记录降级信息
+                error_log(
+                    "警告: 模型 '{$this->config['tokenizer_model']}' 不被分词器支持，已自动降级到 '{$modelToUse}'"
+                );
+            } catch (\Exception $e2) {
+                // 如果回退模型也不支持，使用cl100k_base编码器（最通用的编码器）
+                $encoder = $provider->get('cl100k_base');
+                error_log("警告: 回退模型 '{$modelToUse}' 也不被支持，已使用通用编码器 'cl100k_base'");
+            }
+        }
 
         return count($encoder->encode($code));
     }
