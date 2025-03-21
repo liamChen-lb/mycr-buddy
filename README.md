@@ -1,6 +1,6 @@
 # MyCR-Buddy - AI代码审查助手
 
-[![PHP Version](https://img.shields.io/badge/PHP-7.3%2B-blue.svg)](https://php.net/)
+[![PHP Version](https://img.shields.io/badge/PHP-8.1%2B-blue.svg)](https://php.net/)
 
 智能化的代码审查助手，基于GitHub PR的差异分析，通过本地Ollama大模型提供代码审查建议。
 
@@ -114,18 +114,18 @@ logs/
 
 ## 配置说明
 
-| 配置项 | 说明 |
-|----------------|---------------------------------------------|
-| model_params   | 允许进一步设置模型参数，如温度、TopP等 |
-| github_token   | GitHub个人访问令牌（需repo权限） |
-| ollama_host    | Ollama服务地址（默认`http://localhost:11434`） |
-| model_name     | 使用的模型名称（需提前通过`ollama pull`下载） |
-| context_length | 模型上下文长度（建议设为模型最大支持值） |
-| log_dir        | 日志存储目录（需写权限） |
-| prompt         | 审查提示词模板（`{diff}`占位符会自动替换为PR差异） |
-| tokenizer_model | 分词器模型名称（默认`gpt-3.5-turbo-0301`） |
-| tokenizer_fallback | 备选分词器模型（当主分词器不可用时使用） |
-| **命令行参数**  | `-p now`：立即生成并提交评审<br>`-p pre`：提交最近一次历史评审记录 |
+| 配置项                | 说明                                          |
+|--------------------|---------------------------------------------|
+| model_params       | 允许进一步设置模型参数，如温度、TopP等                       |
+| github_token       | GitHub个人访问令牌（需repo权限）                       |
+| ollama_host        | Ollama服务地址（默认`http://localhost:11434`）      |
+| model_name         | 使用的模型名称（需提前通过`ollama pull`下载）               |
+| context_length     | 模型上下文长度（建议设为模型最大支持值）                        |
+| log_dir            | 日志存储目录（需写权限）                                |
+| prompt             | 审查提示词模板（`{diff}`占位符会自动替换为PR差异）              |
+| tokenizer_model    | 分词器模型名称（默认`gpt-3.5-turbo-0301`）             |
+| tokenizer_fallback | 备选分词器模型（当主分词器不可用时使用）                        |
+| **命令行参数**          | `-p now`：立即生成并提交评审<br>`-p pre`：提交最近一次历史评审记录 |
 
 ## 审查模式对比
 
